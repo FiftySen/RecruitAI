@@ -5,13 +5,15 @@ import { Input } from './ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Brain, Users, Award } from 'lucide-react';
+import { Provider } from '@supabase/supabase-js';
+import { ForgotPassword } from './ForgotPassword';
 
 export function AuthPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInWithOAuth } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const [loginForm, setLoginForm] = useState({
     email: '',
@@ -23,10 +25,8 @@ export function AuthPage() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'candidate' // Default to candidate
+    role: 'candidate'
   });
-
-  // Remove the unnecessary interface definition
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +41,18 @@ export function AuthPage() {
       setLoading(false);
     }
   };
+
+  const handleOAuthLogin = async (provider: Provider) => {
+    setLoading(true);
+    setError('');
+    try {
+      await signInWithOAuth(provider);
+    } catch (error: any) {
+      setError(error.message || 'Failed to sign in with' + provider);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,10 +80,13 @@ export function AuthPage() {
     }
   };
 
+  if (showForgotPassword) {
+    return <ForgotPassword onBackToLogin={() => setShowForgotPassword(false)} />;
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
             <div className="p-2 bg-blue-600 rounded-lg mr-2">
@@ -82,7 +97,6 @@ export function AuthPage() {
           <p className="text-gray-600">AI-Powered Recruitment Platform</p>
         </div>
 
-        {/* Features highlight */}
         <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="text-center p-3 bg-white rounded-lg shadow-sm">
             <Brain className="w-8 h-8 text-blue-600 mx-auto mb-2" />
@@ -98,7 +112,6 @@ export function AuthPage() {
           </div>
         </div>
 
-        {/* Auth Forms */}
         <Card>
           <CardHeader>
             <CardTitle>Welcome</CardTitle>
@@ -137,6 +150,24 @@ export function AuthPage() {
                     {loading ? 'Signing in...' : 'Sign In'}
                   </Button>
                 </form>
+                <Button variant="link" onClick={() => setShowForgotPassword(true)} className="w-full">
+                  Forgot Password?
+                </Button>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Or continue with
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <Button variant="outline" onClick={() => handleOAuthLogin('google')}>
+                    Google
+                  </Button>
+                </div>
               </TabsContent>
               
               <TabsContent value="signup" className="space-y-4 mt-4">
@@ -159,7 +190,6 @@ export function AuthPage() {
                       required
                     />
                   </div>
-                  {/* Remove role selection - only candidates can sign up */}
                   <div>
                     <Input
                       type="password"

@@ -11,6 +11,8 @@ import { AssessmentResults } from './components/AssessmentResults';
 import { JobDetail } from './components/JobDetail';
 import { ApplicationDetail } from './components/ApplicationDetail';
 import { Toaster } from './components/ui/sonner';
+import { Provider } from '@supabase/supabase-js';
+import { ResetPassword } from './components/ResetPassword';
 
 interface User {
   id: string;
@@ -26,6 +28,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string, role?: string) => Promise<void>;
   signOut: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
+  signInWithOAuth: (provider: Provider) => Promise<void>;
+  sendPasswordResetEmail: (email: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -40,8 +44,8 @@ export const useAuth = () => {
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
-  // Helper function to fetch user role from database
   const fetchUserRole = async (userId: string): Promise<string> => {
     try {
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/get-user-role`, {
@@ -55,14 +59,14 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok) {
         console.error('Failed to fetch user role:', response.status);
-        return 'candidate'; // Default to candidate if role fetch fails
+        return 'candidate';
       }
 
       const data = await response.json();
       return data.role || 'candidate';
     } catch (error) {
       console.error('Error fetching user role:', error);
-      return 'candidate'; // Default to candidate on error
+      return 'candidate';
     }
   };
 
@@ -71,7 +75,6 @@ function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (session?.access_token && session.user) {
-          // Fetch role from database
           const role = await fetchUserRole(session.user.id);
           const isAdmin = role === 'admin';
           
@@ -94,8 +97,10 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecovery(true);
+        }
         if (event === 'SIGNED_IN' && session?.user) {
-          // Fetch role from database
           const role = await fetchUserRole(session.user.id);
           const isAdmin = role === 'admin';
           
@@ -125,7 +130,6 @@ function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       
       if (session?.user) {
-        // Fetch role from database
         const role = await fetchUserRole(session.user.id);
         const isAdmin = role === 'admin';
         
@@ -139,6 +143,15 @@ function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Sign in error:', error);
+      throw error;
+    }
+  };
+
+  const signInWithOAuth = async (provider: Provider) => {
+    try {
+      await supabase.auth.signInWithOAuth({ provider });
+    } catch (error) {
+      console.error('OAuth sign in error:', error);
       throw error;
     }
   };
@@ -183,10 +196,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
       
       if (error) throw error;
       
-      // Refresh the current user with the new password
       const { user } = data;
       if (user) {
-        // Fetch role from database
         const role = await fetchUserRole(user.id);
         const isAdmin = role === 'admin';
         
@@ -198,15 +209,27 @@ function AuthProvider({ children }: { children: ReactNode }) {
           role
         });
       }
+      setIsPasswordRecovery(false);
     } catch (error) {
       console.error('Change password error:', error);
       throw error;
     }
   };
 
+  const sendPasswordResetEmail = async (email: string) => {
+    try {
+      await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+    } catch (error) {
+      console.error('Password reset error:', error);
+      throw error;
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, signIn, signUp, signOut, changePassword, loading }}>
-      {children}
+    <AuthContext.Provider value={{ user, signIn, signUp, signOut, changePassword, signInWithOAuth, sendPasswordResetEmail, loading }}>
+      {isPasswordRecovery ? <ResetPassword /> : children}
     </AuthContext.Provider>
   );
 }
@@ -237,7 +260,6 @@ function AppContent() {
   };
 
   const handleBack = () => {
-    // If we came from application detail, go back there
     if (currentPage === 'job-detail-from-application' && previousPage === 'application-detail') {
       setCurrentPage('application-detail');
       setSelectedJobId(undefined);
@@ -251,7 +273,6 @@ function AppContent() {
   };
 
   const handleApply = () => {
-    // Refresh the current page or navigate back to dashboard
     setCurrentPage('dashboard');
   };
 
@@ -270,10 +291,8 @@ function AppContent() {
     return <AuthPage />;
   }
 
-  // Navigation logic
   switch (currentPage) {
     case 'dashboard':
-      // If user is admin, show admin panel, otherwise show candidate dashboard
       if (user.isAdmin) {
         return <EnhancedAdminPanel onBack={handleBack} />;
       } else {
