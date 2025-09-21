@@ -1,7 +1,7 @@
 
   # AI-Powered Recruitment Platform
 
-  This is a code bundle for AI-Powered Recruitment Platform. The original project is available at https://www.figma.com/design/QUsm2tjYlEscTzVuiTwIqP/AI-Powered-Recruitment-Platform.
+  This is a code bundle for AI-Powered Recruitment Platform. A Final Year Project proposed in UTAR by a nood CS student.
 
   ## Running the code
 
