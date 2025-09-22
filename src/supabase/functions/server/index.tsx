@@ -4,6 +4,7 @@ import { cors } from "npm:hono/cors";
 import { Hono } from "npm:hono";
 import { logger } from "npm:hono/logger";
 import * as kv from './kv_store.tsx';
+import { scoreResumeInBackground } from './score-resume.ts';
 
 const app = new Hono();
 
@@ -656,22 +657,18 @@ app.post('/make-server-6ead2a10/upload-resume', async (c) => {
     // Extract text from resume for BERT analysis
     const resumeText = await extractTextFromFile(file);
     
-    // Calculate BERT score (mock implementation)
-    const bertScore = await calculateBERTScore(resumeText);
-
     // Update user profile with resume info
     const profile = await kv.get(`profile:${userId}`) || {};
     profile.resumeUrl = `${userId}/${fileName}`;
     profile.resumeFileName = file.name;
     profile.resumeUploadedAt = new Date().toISOString();
-    profile.bertScore = bertScore; // Store BERT score in profile
+    profile.resume_text = resumeText; // Store extracted text
     
     await kv.set(`profile:${userId}`, profile);
 
     return c.json({ 
       success: true, 
-      resumeUrl: `${userId}/${fileName}`,
-      bertScore: bertScore // Return for admin use only
+      resumeUrl: `${userId}/${fileName}`
     });
   } catch (error) {
     console.error('Upload resume error:', error);
@@ -697,63 +694,36 @@ const extractTextFromFile = async (file: File): Promise<string> => {
   }
 };
 
-// Mock BERT scoring function
-const calculateBERTScore = async (resumeText: string): Promise<number> => {
-  // This is a mock implementation
-  // In production, you'd integrate with actual BERT model
-  const keywords = ['experience', 'skills', 'education', 'project', 'development', 'management'];
-  const wordCount = resumeText.toLowerCase().split(' ').length;
-  const keywordMatches = keywords.filter(keyword => 
-    resumeText.toLowerCase().includes(keyword)
-  ).length;
-  
-  // Simple scoring algorithm (0-100)
-  const baseScore = Math.min(wordCount / 10, 50); // Length factor
-  const keywordScore = (keywordMatches / keywords.length) * 50; // Keyword relevance
-  
-  return Math.round(baseScore + keywordScore);
-};
-
 // Apply for a job position with resume
 app.post('/make-server-6ead2a10/apply-for-job', async (c) => {
-  try {
-    const { userId, positionId, resumeUrl } = await c.req.json();
-    
-    if (!userId || !positionId) {
-      return c.json({ error: 'User ID and Position ID are required' }, 400);
+    try {
+        const { userId, positionId, resumeUrl } = await c.req.json();
+
+        if (!userId || !positionId) {
+            return c.json({ error: 'User ID and Position ID are required' }, 400);
+        }
+
+        const applicationKey = `job-application:${positionId}:${userId}`;
+        const applicationData = {
+            userId,
+            positionId,
+            appliedAt: new Date().toISOString(),
+            status: 'pending',
+            resumeUrl: resumeUrl,
+            resumeScoreStatus: 'pending',
+        };
+
+        await kv.set(applicationKey, applicationData);
+
+        // Don't await this, let it run in the background
+        scoreResumeInBackground(applicationKey, positionId, userId);
+
+        return c.json({ success: true, application: applicationData });
+
+    } catch (error) {
+        console.error('Apply for job error:', error);
+        return c.json({ error: 'Failed to apply for job' }, 500);
     }
-
-    // Check if position exists
-    const position = await kv.get(`job-position:${positionId}`);
-    if (!position) {
-      return c.json({ error: 'Job position not found' }, 404);
-    }
-
-    // Check if user already applied
-    const existingApplication = await kv.get(`job-application:${positionId}:${userId}`);
-    if (existingApplication) {
-      return c.json({ error: 'You have already applied for this position' }, 400);
-    }
-
-    // Get user profile for BERT score
-    const profile = await kv.get(`profile:${userId}`) || {};
-
-    const applicationData = {
-      userId,
-      positionId,
-      appliedAt: new Date().toISOString(),
-      status: 'pending',
-      resumeUrl: resumeUrl || profile.resumeUrl,
-      bertScore: profile.bertScore || 0 // Include BERT score in application
-    };
-
-    await kv.set(`job-application:${positionId}:${userId}`, applicationData);
-    
-    return c.json({ success: true, application: applicationData });
-  } catch (error) {
-    console.error('Apply for job error:', error);
-    return c.json({ error: 'Failed to apply for job' }, 500);
-  }
 });
 
 // Get user's job applications
@@ -820,6 +790,7 @@ app.post('/make-server-6ead2a10/get-user-applications', async (c) => {
   }
 });
 
+
 // ===== CANDIDATE RANKING ENDPOINTS =====
 
 // Get ranked candidates for a job position (Admin only)
@@ -880,8 +851,8 @@ app.post('/make-server-6ead2a10/get-ranked-candidates', async (c) => {
             softSkills: softSkillsScore,
             technical: technicalScore,
             weighted: Math.round(weightedScore * 100) / 100,
-            bertScore: app.value.bertScore || 0 // Include BERT score
-          }
+          },
+          resumeScore: app.value.resumeScore,
         });
       }
     }
@@ -899,6 +870,7 @@ app.post('/make-server-6ead2a10/get-ranked-candidates', async (c) => {
     return c.json({ error: 'Failed to retrieve ranked candidates' }, 500);
   }
 });
+
 
 // Get resume URL for admin
 app.post('/make-server-6ead2a10/get-resume-url', async (c) => {
@@ -1160,4 +1132,4 @@ app.post('/make-server-6ead2a10/update-application-status', async (c) => {
   }
 });
 
-Deno.serve(app.fetch);
+serve(app.fetch);

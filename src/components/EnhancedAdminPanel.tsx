@@ -78,7 +78,11 @@ interface RankedCandidate {
     softSkills: number;
     technical: number;
     weighted: number;
-    bertScore?: number;
+  };
+  resumeScore?: {
+    overall: number;
+    analysis: any;
+    sectionScores: any;
   };
 }
 
@@ -442,39 +446,36 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
     }
   };
 
-  const fetchRankedCandidates = async (positionId: string) => {
-    if (!user?.id) return;
+    const fetchRankedCandidates = async (positionId: string) => {
+        if (!user?.id) return;
 
-    setLoading(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/get-ranked-candidates`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || publicAnonKey}`
-        },
-        body: JSON.stringify({ positionId })
-      });
+        setLoading(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Fetch candidates error response:', errorText);
-        throw new Error(`Failed to fetch candidates: ${response.status} ${response.statusText}`);
-      }
+            const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/get-ranked-candidates`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session?.access_token || publicAnonKey}`
+                },
+                body: JSON.stringify({ positionId })
+            });
 
-      const data = await response.json();
-      setRankedCandidates(data.candidates || []);
-      setSelectedPosition(data.position);
-      setActiveTab('rankings');
-    } catch (error) {
-      console.error('Error fetching candidates:', error);
-      toast.error('Failed to load candidates. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+            if (!response.ok) throw new Error('Failed to fetch candidates');
+
+            const data = await response.json();
+
+            setRankedCandidates(data.candidates || []);
+            setSelectedPosition(data.position);
+            setActiveTab('rankings');
+        } catch (error) {
+            console.error('Error fetching candidates:', error);
+            toast.error('Failed to load candidates. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
   const downloadResume = async (candidate: RankedCandidate) => {
     if (!candidate.profile?.resumeUrl) {
@@ -1525,9 +1526,11 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
                                   </Badge>
                                 </TableCell>
                                 <TableCell>
-                                  {candidate.scores?.bertScore ? (
-                                    <Badge className={getResumeScoreColor(candidate.scores.bertScore)}>
-                                      {candidate.scores.bertScore.toFixed(1)}%
+                                  {candidate.application.resumeScoreStatus === 'pending' ? (
+                                    <Badge variant="outline">Pending</Badge>
+                                  ) : candidate.application.resumeScore?.analysis.overallScore ? (
+                                    <Badge className={getResumeScoreColor(candidate.application.resumeScore.analysis.overallScore)}>
+                                      {candidate.application.resumeScore.analysis.overallScore.toFixed(1)}%
                                     </Badge>
                                   ) : (
                                     <span className="text-sm text-gray-400">N/A</span>
@@ -1661,11 +1664,11 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
                       <span>Weighted Score:</span>
                       <Badge className="bg-blue-100 text-blue-800">{selectedCandidate.scores?.weighted?.toFixed(1) || 0}%</Badge>
                     </div>
-                    {selectedCandidate.scores?.bertScore && (
+                    {selectedCandidate.resumeScore?.analysis.overallScore && (
                       <div className="flex justify-between">
                         <span>Resume Score:</span>
-                        <Badge className={getResumeScoreColor(selectedCandidate.scores.bertScore)}>
-                          {selectedCandidate.scores.bertScore.toFixed(1)}%
+                        <Badge className={getResumeScoreColor(selectedCandidate.resumeScore.analysis.overallScore)}>
+                          {selectedCandidate.resumeScore.analysis.overallScore.toFixed(1)}%
                         </Badge>
                       </div>
                     )}
