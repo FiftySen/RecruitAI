@@ -754,6 +754,115 @@ app.post('/make-server-6ead2a10/update-job-status', async (c)=>{
     }, 500);
   }
 });
+// --- NEW ENDPOINT 1: Start the Assessment ---
+app.post('/make-server-6ead2a10/start-assessment', async (c)=>{
+  try {
+    const { userId, positionId } = await c.req.json();
+    const applicationKey = `job-application:${positionId}:${userId}`;
+    // 1. Fetch job and resume data
+    const job = await kv.get(`job-position:${positionId}`);
+    const application = await kv.get(applicationKey);
+    if (!job || !application || !application.resumeText) {
+      throw new Error('Job or application data not found.');
+    }
+    // 2. Create a new assessment session
+    const sessionKey = `assessment-session:${applicationKey}`;
+    const session = {
+      jobRole: job.title,
+      assessmentCriteria: job.assessmentConfiguration?.selectedTechnicalSubSkills || [],
+      resumeText: application.resumeText,
+      conversationHistory: [],
+      questionCount: 0
+    };
+    await kv.set(sessionKey, session);
+    // 3. Get the FIRST question from the AI
+    // NOTE: callAIAssessment is a new helper function we will create
+    const aiResponse = await callAIAssessment('next_action', session);
+    return c.json({
+      sessionKey,
+      firstQuestion: aiResponse.question
+    });
+  } catch (error) {
+    console.error('Error starting assessment:', error);
+    return c.json({
+      error: 'Failed to start assessment'
+    }, 500);
+  }
+});
+// --- NEW ENDPOINT 2: Handle Each Answer ---
+app.post('/make-server-6ead2a10/submit-answer', async (c)=>{
+  try {
+    const { sessionKey, answer } = await c.req.json();
+    const session = await kv.get(sessionKey);
+    if (!session) throw new Error('Assessment session not found.');
+    // 1. Update history and question count
+    session.conversationHistory.push({
+      speaker: 'ai',
+      text: session.lastQuestion
+    });
+    session.conversationHistory.push({
+      speaker: 'user',
+      text: answer
+    });
+    session.questionCount += 1;
+    if (session.questionCount >= 10) {
+      // 2. Interview is over: generate the final report
+      const report = await callAIAssessment('generate_report', session);
+      // Save report to the main application object
+      const applicationKey = sessionKey.replace('assessment-session:', '');
+      const application = await kv.get(applicationKey);
+      if (application) {
+        application.assessmentReport = report;
+        application.status = 'under_review'; // Or another status
+        await kv.set(applicationKey, application);
+      }
+      await kv.del(sessionKey); // Clean up the session
+      return c.json({
+        status: 'completed'
+      });
+    } else {
+      // 3. Interview continues: get the next question
+      const aiResponse = await callAIAssessment('next_action', session);
+      session.lastQuestion = aiResponse.question; // Remember the last question asked
+      await kv.set(sessionKey, session);
+      return c.json({
+        status: 'in_progress',
+        nextQuestion: aiResponse.question
+      });
+    }
+  } catch (error) {
+    console.error('Error submitting answer:', error);
+    return c.json({
+      error: 'Failed to process answer'
+    }, 500);
+  }
+});
+// --- NEW HELPER FUNCTION: Call Your Fine-Tuned AI ---
+async function callAIAssessment(task, session) {
+  const DEEPSEEK_API_URL = "your-deployed-deepseek-api-url"; // From Hugging Face or Colab
+  const HF_TOKEN = Deno.env.get('HF_TOKEN'); // Store your token securely
+  let instruction = "";
+  if (task === 'next_action') {
+    instruction = "You are an expert AI interviewer. Given the job role, assessment criteria, candidate's resume, and the conversation so far, decide the best next question to ask...";
+  } else {
+    instruction = "You are an AI evaluator. Based on the job criteria, the candidate's resume, and the full interview transcript, generate a comprehensive performance report in JSON format...";
+  }
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${HF_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      inputs: {
+        instruction,
+        input: session
+      } // This matches the training format
+    })
+  });
+  if (!response.ok) throw new Error('AI model API call failed');
+  return response.json();
+}
 // Start initialization tasks in the background.
 initializeBuckets();
 serve(app.fetch);
