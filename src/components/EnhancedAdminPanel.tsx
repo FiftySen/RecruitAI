@@ -38,7 +38,6 @@ interface JobPosition {
     technical: string[];
     software: string[];
   };
-  // Add the assessmentConfiguration field
   assessmentConfiguration?: {
     softSkillsAreas: string[];
     technicalAreas: string[];
@@ -124,9 +123,9 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
   const [assessmentConfig, setAssessmentConfig] = useState({
     selectedSoftSkillsAreas: [] as string[],
     selectedTechnicalAreas: [] as string[],
-    selectedSoftSkillsSubAreas: {} as Record<string, string[]>, // New: track sub-skills for soft skills
-    selectedTechnicalSubSkills: {} as Record<string, string[]>, // New: track sub-skills for each area
-    customSoftSkills: '', // Separate custom fields
+    selectedSoftSkillsSubAreas: {} as Record<string, string[]>, 
+    selectedTechnicalSubSkills: {} as Record<string, string[]>, 
+    customSoftSkills: '', 
     customTechnicalSkills: ''
   });
 
@@ -652,6 +651,35 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
     } catch (error) {
       console.error('Error deleting position:', error);
       toast.error('Failed to delete position. Please try again.');
+    }
+  };
+
+  const handleStatusChange = async (positionId: string, status: 'open' | 'closed') => {
+    if (!user?.id) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/update-job-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || publicAnonKey}`
+        },
+        body: JSON.stringify({ positionId, status })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Update status error response:', errorText);
+        throw new Error(`Failed to update status: ${response.status} ${response.statusText}`);
+      }
+
+      toast.success('Position status updated successfully!');
+      fetchJobPositions();
+    } catch (error) {
+      console.error('Error updating status:', error);
+      toast.error('Failed to update status. Please try again.');
     }
   };
 
@@ -1367,9 +1395,18 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge className={getStatusColor(position.status)}>
-                                {position.status}
-                              </Badge>
+                              <Select
+                                value={position.status}
+                                onValueChange={(value: 'open' | 'closed') => handleStatusChange(position.id, value)}
+                              >
+                                <SelectTrigger className={getStatusColor(position.status)}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="open">Open</SelectItem>
+                                  <SelectItem value="closed">Closed</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </TableCell>
                             <TableCell>
                               <div className="text-xs">

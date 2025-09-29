@@ -163,7 +163,9 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
 
       const data = await response.json();
       toast.success('Resume uploaded successfully!');
-      return data.resumeUrl;
+      
+      // CHANGED: Return the whole data object (which includes resumeUrl and resumeText)
+      return data; 
     } catch (error) {
       console.error('Error uploading resume:', error);
       toast.error('Failed to upload resume. Please try again.');
@@ -188,17 +190,28 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
 
     setApplying(true);
     try {
-      // First upload resume
-      const resumeUrl = await handleResumeUpload();
+      // CHANGED: First, upload resume and get back BOTH the URL and the text
+      const uploadResult = await handleResumeUpload();
+      if (!uploadResult || !uploadResult.resumeUrl || !uploadResult.resumeText) {
+        throw new Error("Resume upload failed or did not return required data.");
+      }
+      
+      const { resumeUrl, resumeText } = uploadResult;
 
-      // Then apply for job
+      // Then apply for the job, now including the resumeText
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/apply-for-job`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${publicAnonKey}`
         },
-        body: JSON.stringify({ userId: user.id, positionId: jobId, resumeUrl })
+        // CHANGED: Added resumeText to the body of the request
+        body: JSON.stringify({ 
+            userId: user.id, 
+            positionId: jobId, 
+            resumeUrl,
+            resumeText 
+        })
       });
 
       if (!response.ok) throw new Error('Failed to apply for job');
