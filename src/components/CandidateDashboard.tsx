@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Input } from './ui/input';
+import { supabase } from '../utils/supabase/client';
 import { 
   Brain, 
   User, 
@@ -190,22 +191,25 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
 
     setApplying(true);
     try {
-      // CHANGED: First, upload resume and get back BOTH the URL and the text
+      // First, upload resume to get the URL and text
       const uploadResult = await handleResumeUpload();
       if (!uploadResult || !uploadResult.resumeUrl || !uploadResult.resumeText) {
         throw new Error("Resume upload failed or did not return required data.");
       }
       
       const { resumeUrl, resumeText } = uploadResult;
+      
+      // Get the user's session to include the auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("User not authenticated.");
 
-      // Then apply for the job, now including the resumeText
+      // Then apply for the job, now including the auth token and resumeText
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6ead2a10/apply-for-job`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${publicAnonKey}`
+          'Authorization': `Bearer ${session.access_token}` // <-- THE FIX IS HERE
         },
-        // CHANGED: Added resumeText to the body of the request
         body: JSON.stringify({ 
             userId: user.id, 
             positionId: jobId, 
@@ -217,7 +221,7 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
       if (!response.ok) throw new Error('Failed to apply for job');
 
       toast.success('Application submitted successfully!');
-      fetchUserApplications();
+      fetchUserApplications(); // Refresh the list of applications
       setActiveTab('applications');
       setSelectedJob(null);
       setResumeFile(null);
@@ -230,6 +234,7 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
   };
 
   const handleTakeAssessment = (type: 'soft-skills' | 'technical', positionId?: string) => {
+    console.log('Attempting to start assessment:', type, 'for positionId:', positionId);
     if (userApplications.length === 0) {
       toast.error('Please apply for a job position before taking assessments');
       setActiveTab('jobs');
@@ -270,9 +275,11 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
     const softSkillsComplete = application.assessmentStatus.softSkills === 'completed';
     const technicalComplete = application.assessmentStatus.technical === 'completed';
     
-    if (softSkillsComplete && technicalComplete) return 100;
-    if (softSkillsComplete || technicalComplete) return 50;
-    return 0;
+    let completedCount = 0;
+    if (softSkillsComplete) completedCount++;
+    if (technicalComplete) completedCount++;
+    
+    return (completedCount / 2) * 100;
   };
 
   const formatDate = (dateString: string) => {
@@ -713,49 +720,38 @@ export function CandidateDashboard({ onNavigate }: CandidateDashboardProps) {
                             <div className="space-y-2">
                               <h4 className="text-sm font-medium text-gray-700">Take Assessments</h4>
                               <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTakeAssessment('soft-skills', application.positionId);
-                                  }}
-                                  disabled={application.assessmentStatus?.softSkills === 'completed'}
-                                  className="flex items-center gap-1"
-                                >
-                                  <Users className="w-3 h-3" />
-                                  Soft Skills
-                                  {application.assessmentStatus?.softSkills === 'completed' && (
-                                    <CheckCircle className="w-3 h-3 text-green-600" />
-                                  )}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTakeAssessment('technical', application.positionId);
-                                  }}
-                                  disabled={application.assessmentStatus?.technical === 'completed'}
-                                  className="flex items-center gap-1"
-                                >
-                                  <Code className="w-3 h-3" />
-                                  Technical
-                                  {application.assessmentStatus?.technical === 'completed' && (
-                                    <CheckCircle className="w-3 h-3 text-green-600" />
-                                  )}
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <h4 className="text-sm font-medium text-gray-700">Assessment Scores</h4>
-                              <div className="flex gap-4 text-sm">
-                                <div>
-                                  Soft Skills: {application.scores?.softSkills || 0}%
-                                </div>
-                                <div>
-                                  Technical: {application.scores?.technical || 0}%
-                                </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTakeAssessment('soft-skills', application.positionId);
+                                }}
+                                disabled={application.assessmentStatus?.softSkills === 'completed'}
+                                className="flex items-center gap-1"
+                              >
+                                <Users className="w-3 h-3" />
+                                Soft Skills
+                                {application.assessmentStatus?.softSkills === 'completed' && (
+                                  <CheckCircle className="w-3 h-3 text-green-600" />
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTakeAssessment('technical', application.positionId);
+                                }}
+                                disabled={application.assessmentStatus?.technical === 'completed'}
+                                className="flex items-center gap-1"
+                              >
+                                <Code className="w-3 h-3" />
+                                Technical
+                                {application.assessmentStatus?.technical === 'completed' && (
+                                  <CheckCircle className="w-3 h-3 text-green-600" />
+                                )}
+                              </Button>
                               </div>
                             </div>
                           </div>

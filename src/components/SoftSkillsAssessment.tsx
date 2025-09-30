@@ -1,3 +1,5 @@
+// src/components/SoftSkillsAssessment.tsx
+
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../App';
 import { Button } from './ui/button';
@@ -5,9 +7,10 @@ import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../utils/supabase/client';
 
 // This component will now manage the entire chat-based assessment
-export function SoftSkillsAssessment() {
+export function SoftSkillsAssessment({ onBack }: { onBack: () => void }) { // <-- ADD onBack PROP
   const { user } = useAuth();
   const [sessionKey, setSessionKey] = useState<string | null>(null);
   const [history, setHistory] = useState<{ speaker: 'ai' | 'user'; text: string }[]>([]);
@@ -24,6 +27,9 @@ export function SoftSkillsAssessment() {
   // Step 1: Start the assessment when the component mounts
   useEffect(() => {
     const startAssessment = async () => {
+      if (!user) {
+        return;
+      }
       setIsLoading(true);
       try {
         const positionId = localStorage.getItem('currentAssessmentPositionId');
@@ -31,10 +37,16 @@ export function SoftSkillsAssessment() {
           throw new Error("User or Position ID not found. Please start from the dashboard.");
         }
 
-        const response = await fetch('/make-server-6ead2a10/start-assessment', {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("User not authenticated");
+
+        const response = await fetch('https://kjksyigqsvrpowxodnim.supabase.co/functions/v1/make-server-6ead2a10/start-assessment', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, positionId }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ userId: user.id, positionId, assessmentType: 'soft-skills' }),
         });
 
         if (!response.ok) throw new Error('Failed to start the assessment.');
@@ -51,7 +63,7 @@ export function SoftSkillsAssessment() {
       }
     };
     startAssessment();
-  }, [user]);
+  }, []);
 
   // Step 2: Handle sending a message to the orchestrator
   const handleSendMessage = async () => {
@@ -64,9 +76,15 @@ export function SoftSkillsAssessment() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/make-server-6ead2a10/submit-answer', {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("User not authenticated");
+
+      const response = await fetch('https://kjksyigqsvrpowxodnim.supabase.co/functions/v1/make-server-6ead2a10/submit-answer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
         body: JSON.stringify({ sessionKey, answer: answerToSend }),
       });
       
@@ -77,6 +95,7 @@ export function SoftSkillsAssessment() {
       if (data.status === 'completed') {
         setIsCompleted(true);
         setHistory(prev => [...prev, { speaker: 'ai', text: "Thank you. That completes your assessment. You may now close this window." }]);
+        setTimeout(() => onBack(), 2000); // <-- ADD THIS LINE TO REDIRECT AFTER 2 SECONDS
       } else {
         setHistory(prev => [...prev, { speaker: 'ai', text: data.nextQuestion }]);
       }

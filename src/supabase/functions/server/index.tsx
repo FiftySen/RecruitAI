@@ -10,12 +10,12 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cors } from "npm:hono/cors";
 import { Hono } from "npm:hono";
 import { logger } from "npm:hono/logger";
+import OpenAI from 'npm:openai';
 import * as kv from './kv_store.tsx';
 // --- IMPORTS for reliable file parsing ---
 import pdf from "npm:pdf-parse";
 import mammoth from "npm:mammoth";
 const app = new Hono();
-// Middleware
 app.use('*', cors({
   origin: '*',
   allowMethods: [
@@ -36,6 +36,10 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const HUGGING_FACE_TOKEN = Deno.env.get('HUGGING_FACE_TOKEN');
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY
+});
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // --- Scoring Logic using Hugging Face API ---
@@ -308,9 +312,6 @@ const verifyAdminRole = async (accessToken)=>{
 // --- Main Server Endpoints ---
 app.post('/make-server-6ead2a10/apply-for-job', async (c)=>{
   try {
-    // --- CHANGED SECTION ---
-    // The endpoint now accepts `resumeText` directly.
-    // The frontend should get this text from the `/upload-resume` response.
     const { userId, positionId, resumeUrl, resumeText } = await c.req.json();
     if (!userId || !positionId || !resumeText) {
       return c.json({
@@ -318,6 +319,7 @@ app.post('/make-server-6ead2a10/apply-for-job', async (c)=>{
       }, 400);
     }
     const applicationKey = `job-application:${positionId}:${userId}`;
+    // Create the application with a complete and consistent structure from the start
     const applicationData = {
       userId,
       positionId,
@@ -325,10 +327,21 @@ app.post('/make-server-6ead2a10/apply-for-job', async (c)=>{
       status: 'pending',
       resumeUrl,
       resumeText,
-      resumeScoreStatus: 'pending'
+      resumeScoreStatus: 'pending',
+      // --- ADD THESE FIELDS ---
+      scores: {
+        softSkills: 0,
+        technical: 0,
+        weighted: 0
+      },
+      assessmentStatus: {
+        softSkills: 'not_started',
+        technical: 'not_started'
+      },
+      assessmentReport: {}
     };
     await kv.set(applicationKey, applicationData);
-    // CHANGED: No longer need to pass userId
+    // Start the resume scoring in the background
     scoreResumeInBackground(applicationKey, positionId);
     return c.json({
       success: true,
@@ -635,11 +648,12 @@ app.post('/make-server-6ead2a10/get-ranked-candidates', async (c)=>{
       if (app.value?.userId) {
         const { userId } = app.value;
         const profile = await kv.get(`profile:${userId}`);
-        const scores = {
+        // Directly use the scores from the application data
+        const scores = app.value.scores || {
           softSkills: 0,
           technical: 0,
           weighted: 0
-        }; // Placeholder
+        };
         return {
           userId,
           profile,
@@ -650,7 +664,7 @@ app.post('/make-server-6ead2a10/get-ranked-candidates', async (c)=>{
       }
       return null;
     }));
-    const rankedCandidates = candidates.filter(Boolean).sort((a, b)=>b.scores.weighted - a.scores.weighted);
+    const rankedCandidates = candidates.filter(Boolean).sort((a, b)=>(b.scores.weighted || 0) - (a.scores.weighted || 0));
     return c.json({
       position: {
         id: positionId,
@@ -757,27 +771,47 @@ app.post('/make-server-6ead2a10/update-job-status', async (c)=>{
 // --- NEW ENDPOINT 1: Start the Assessment ---
 app.post('/make-server-6ead2a10/start-assessment', async (c)=>{
   try {
-    const { userId, positionId } = await c.req.json();
+    const { userId, positionId, assessmentType } = await c.req.json();
     const applicationKey = `job-application:${positionId}:${userId}`;
-    // 1. Fetch job and resume data
+    // 1. Fetch job and application data
     const job = await kv.get(`job-position:${positionId}`);
     const application = await kv.get(applicationKey);
     if (!job || !application || !application.resumeText) {
       throw new Error('Job or application data not found.');
     }
-    // 2. Create a new assessment session
-    const sessionKey = `assessment-session:${applicationKey}`;
+    // 2. Determine which skills to use based on the assessment type
+    let assessmentCriteria = [];
+    if (job.assessmentConfiguration) {
+      if (assessmentType === 'soft-skills') {
+        if (job.assessmentConfiguration.selectedSoftSkillsSubAreas) {
+          assessmentCriteria.push(...job.assessmentConfiguration.selectedSoftSkillsSubAreas);
+        }
+        if (job.assessmentConfiguration.customSoftSkills) {
+          assessmentCriteria.push(...job.assessmentConfiguration.customSoftSkills.split('\n').filter((s)=>s.trim()));
+        }
+      } else if (assessmentType === 'technical') {
+        if (job.assessmentConfiguration.selectedTechnicalSubSkills) {
+          assessmentCriteria.push(...job.assessmentConfiguration.selectedTechnicalSubSkills);
+        }
+        if (job.assessmentConfiguration.customTechnicalSkills) {
+          assessmentCriteria.push(...job.assessmentConfiguration.customTechnicalSkills.split('\n').filter((s)=>s.trim()));
+        }
+      }
+    }
+    // 3. Create a new assessment session
+    const sessionKey = `assessment-session:${applicationKey}:${assessmentType}`; // Make session key unique
     const session = {
       jobRole: job.title,
-      assessmentCriteria: job.assessmentConfiguration?.selectedTechnicalSubSkills || [],
+      assessmentCriteria: assessmentCriteria,
       resumeText: application.resumeText,
       conversationHistory: [],
-      questionCount: 0
+      questionCount: 0,
+      assessmentType: assessmentType
     };
+    // 4. Get the FIRST question from the AI
+    const aiResponse = await callOpenAIAssessment('next_action', session);
+    session.lastQuestion = aiResponse.question;
     await kv.set(sessionKey, session);
-    // 3. Get the FIRST question from the AI
-    // NOTE: callAIAssessment is a new helper function we will create
-    const aiResponse = await callAIAssessment('next_action', session);
     return c.json({
       sessionKey,
       firstQuestion: aiResponse.question
@@ -794,26 +828,60 @@ app.post('/make-server-6ead2a10/submit-answer', async (c)=>{
   try {
     const { sessionKey, answer } = await c.req.json();
     const session = await kv.get(sessionKey);
-    if (!session) throw new Error('Assessment session not found.');
-    // 1. Update history and question count
+    if (!session) {
+      throw new Error('Assessment session not found or has expired.');
+    }
+    // 1. Update conversation history
     session.conversationHistory.push({
       speaker: 'ai',
-      text: session.lastQuestion
+      text: session.lastQuestion || ''
     });
     session.conversationHistory.push({
       speaker: 'user',
       text: answer
     });
     session.questionCount += 1;
+    // 2. Check if the assessment is complete
     if (session.questionCount >= 10) {
-      // 2. Interview is over: generate the final report
-      const report = await callAIAssessment('generate_report', session);
-      // Save report to the main application object
-      const applicationKey = sessionKey.replace('assessment-session:', '');
+      const report = await callOpenAIAssessment('generate_report', session);
+      const applicationKey = sessionKey.replace(`assessment-session:`, '').replace(`:${session.assessmentType}`, '');
       const application = await kv.get(applicationKey);
       if (application) {
-        application.assessmentReport = report;
-        application.status = 'under_review'; // Or another status
+        // Initialize fields if they don't exist
+        if (!application.assessmentStatus) {
+          application.assessmentStatus = {
+            softSkills: 'not_started',
+            technical: 'not_started'
+          };
+        }
+        if (!application.scores) {
+          application.scores = {
+            softSkills: 0,
+            technical: 0,
+            weighted: 0
+          };
+        }
+        if (!application.assessmentReport) {
+          application.assessmentReport = {};
+        }
+        // Update status, report, and scores for the specific assessment type
+        if (session.assessmentType === 'soft-skills') {
+          application.assessmentStatus.softSkills = 'completed';
+          application.scores.softSkills = report.overallScore;
+          application.assessmentReport.softSkills = report;
+        } else if (session.assessmentType === 'technical') {
+          application.assessmentStatus.technical = 'completed';
+          application.scores.technical = report.overallScore;
+          application.assessmentReport.technical = report;
+        }
+        // Recalculate the weighted score
+        const job = await kv.get(`job-position:${application.positionId}`);
+        const weights = job?.assessmentWeights || {
+          softSkills: 50,
+          technical: 50
+        };
+        const weightedScore = application.scores.softSkills * (weights.softSkills / 100) + application.scores.technical * (weights.technical / 100);
+        application.scores.weighted = parseFloat(weightedScore.toFixed(1));
         await kv.set(applicationKey, application);
       }
       await kv.del(sessionKey); // Clean up the session
@@ -821,9 +889,9 @@ app.post('/make-server-6ead2a10/submit-answer', async (c)=>{
         status: 'completed'
       });
     } else {
-      // 3. Interview continues: get the next question
-      const aiResponse = await callAIAssessment('next_action', session);
-      session.lastQuestion = aiResponse.question; // Remember the last question asked
+      // 3. If not complete, get the next question
+      const aiResponse = await callOpenAIAssessment('next_action', session);
+      session.lastQuestion = aiResponse.question;
       await kv.set(sessionKey, session);
       return c.json({
         status: 'in_progress',
@@ -837,31 +905,85 @@ app.post('/make-server-6ead2a10/submit-answer', async (c)=>{
     }, 500);
   }
 });
-// --- NEW HELPER FUNCTION: Call Your Fine-Tuned AI ---
-async function callAIAssessment(task, session) {
-  const DEEPSEEK_API_URL = "your-deployed-deepseek-api-url"; // From Hugging Face or Colab
-  const HF_TOKEN = Deno.env.get('HF_TOKEN'); // Store your token securely
-  let instruction = "";
+async function callOpenAIAssessment(task, session) {
+  const messages = [];
+  let system_prompt = "";
   if (task === 'next_action') {
-    instruction = "You are an expert AI interviewer. Given the job role, assessment criteria, candidate's resume, and the conversation so far, decide the best next question to ask...";
+    const remainingSkills = session.assessmentCriteria.filter((skill)=>!session.conversationHistory.some((turn)=>turn.text.toLowerCase().includes(skill.toLowerCase())));
+    system_prompt = `You are a sharp, experienced senior hiring manager conducting a ${session.assessmentType} assessment for the role of '${session.jobRole}'. Your goal is to deeply evaluate a candidate's skills, not just ask superficial questions.
+
+        **SKILLS TO ASSESS:**
+        - All skills to cover: ${session.assessmentCriteria.join(', ')}
+        - Skills you have NOT asked about yet: ${remainingSkills.join(', ') || 'All skills have been touched on. Ask a final, challenging follow-up question.'}
+
+        **YOUR RULES:**
+        1.  **NO REPETITION:** Review the entire conversation history. It is critical that you DO NOT ask a question that is similar to one already asked.
+        2.  **PROBE FOR DEPTH:** If a candidate's answer is vague, generic, or lacks specific details (e.g., "I solved a problem by thinking about it"), you MUST ask a follow-up question to probe for specifics. Do not move on until you get a concrete example or the candidate fails to provide one.
+        3.  **STRATEGIC QUESTIONING:** Prioritize asking about a skill from the "Skills you have NOT asked about yet" list.
+        4.  **ONE QUESTION AT A TIME:** Ask only a single, clear, open-ended question.
+        5.  **JSON FORMAT:** Your response MUST BE a valid JSON object with a single key "question".`;
+    if (session.assessmentType === 'soft-skills') {
+      system_prompt += `\n- Frame your questions as scenario-based behavioral questions using the STAR method format (e.g., "Tell me about a time when...", "Describe a situation where...").`;
+    } else if (session.assessmentType === 'technical') {
+      system_prompt += `\n- Frame your questions as technical problem-solving challenges, code analysis tasks, or system design discussions.`;
+    }
+    messages.push({
+      role: "system",
+      content: system_prompt
+    });
+    // Add the conversation history to the messages array
+    session.conversationHistory.forEach((turn)=>{
+      messages.push({
+        role: turn.speaker === 'ai' ? 'assistant' : 'user',
+        content: turn.text
+      });
+    });
   } else {
-    instruction = "You are an AI evaluator. Based on the job criteria, the candidate's resume, and the full interview transcript, generate a comprehensive performance report in JSON format...";
+    system_prompt = `You are a strict but fair AI evaluator. Your task is to critically analyze an interview transcript and provide a score based on concrete evidence.
+
+        **ASSESSMENT CRITERIA:** ${session.assessmentCriteria.join(', ')}
+
+        **GRADING RUBRIC:**
+        - **Excellent (90-100):** Answer uses the STAR method (Situation, Task, Action, Result) with specific details and quantifiable outcomes.
+        - **Good (70-89):** Answer is relevant but may lack some specific details or clear impact.
+        - **Average (50-69):** Answer is generic, hypothetical, or lacks a concrete example.
+        - **Poor (0-49):** Answer is evasive, irrelevant, or shows no evidence of the skill.
+
+        **CRITICAL RULE:** An answer like "Some challenge happened. I can't remember specifics. I thought about it and made a call. The outcome was whatever." demonstrates ZERO skill. It is a non-answer and MUST receive a score below 20 for that skill. Do not give points for vague responses.
+        
+        **YOUR TASK:**
+        - Analyze the entire conversation provided by the user.
+        - Evaluate the candidate's responses against the GRADING RUBRIC.
+        - Be critical. Justify low scores by pointing to the lack of specific evidence.
+        - Provide a final report as a JSON object with the specified structure.`;
+    messages.push({
+      role: "system",
+      content: system_prompt
+    });
+    const fullTranscript = session.conversationHistory.map((turn)=>`${turn.speaker}: ${turn.text}`).join('\n');
+    messages.push({
+      role: 'user',
+      content: `**CANDIDATE'S RESUME:**\n${session.resumeText}\n\n**FULL INTERVIEW TRANSCRIPT:**\n${fullTranscript}`
+    });
   }
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${HF_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      inputs: {
-        instruction,
-        input: session
-      } // This matches the training format
-    })
+  const completion = await openai.chat.completions.create({
+    messages: messages,
+    model: "gpt-4o",
+    response_format: {
+      type: "json_object"
+    }
   });
-  if (!response.ok) throw new Error('AI model API call failed');
-  return response.json();
+  try {
+    return JSON.parse(completion.choices[0].message.content);
+  } catch (e) {
+    console.error("Failed to parse AI JSON response:", completion.choices[0].message.content);
+    if (task === 'next_action') {
+      return {
+        question: "My apologies, there was a slight issue. Let's try a different question: can you tell me about a project you're particularly proud of?"
+      };
+    }
+    throw new Error("Failed to parse AI response as JSON.");
+  }
 }
 // Start initialization tasks in the background.
 initializeBuckets();

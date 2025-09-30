@@ -7,7 +7,6 @@ import { EnhancedAdminPanel } from './components/EnhancedAdminPanel';
 import { SoftSkillsAssessment } from './components/SoftSkillsAssessment';
 import { TechnicalAssessment } from './components/TechnicalAssessment';
 import { Profile } from './components/Profile';
-import { AssessmentResults } from './components/AssessmentResults';
 import { JobDetail } from './components/JobDetail';
 import { ApplicationDetail } from './components/ApplicationDetail';
 import { Toaster } from './components/ui/sonner';
@@ -234,7 +233,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-type Page = 'dashboard' | 'soft-skills' | 'technical' | 'profile' | 'results' | 'admin' | 'job-detail' | 'application-detail' | 'job-detail-from-application';
+type Page = 'dashboard' | 'soft-skills' | 'technical' | 'profile' | 'admin' | 'job-detail' | 'application-detail' | 'job-detail-from-application';
 
 export default function App() {
   return (
@@ -307,9 +306,6 @@ function AppContent() {
     
     case 'profile':
       return <Profile onBack={handleBack} />;
-    
-    case 'results':
-      return <AssessmentResults onBack={handleBack} />;
     
     case 'admin':
       return <EnhancedAdminPanel onBack={handleBack} />;

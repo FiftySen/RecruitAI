@@ -1078,7 +1078,7 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
           <div className="bg-white p-4 rounded-lg border">
             <Label className="text-sm font-medium mb-3 block text-blue-700">🧠 Soft Skills Areas</Label>
             <div className="space-y-3 max-h-64 overflow-y-auto">
-              {Object.entries(SOFT_SKILLS_AREAS).map(([category, skills]) => (
+              {SOFT_SKILLS_AREAS && Object.entries(SOFT_SKILLS_AREAS).map(([category, skills]) => (
                 <div key={category} className="space-y-2">
                   <div className="flex items-center space-x-2 p-2 bg-blue-50 rounded">
                     <Checkbox
@@ -1136,7 +1136,7 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
           <div className="bg-white p-4 rounded-lg border">
             <Label className="text-sm font-medium mb-3 block text-green-700">⚙️ Technical Areas</Label>
             <div className="space-y-3 max-h-64 overflow-y-auto">
-              {Object.entries(TECHNICAL_AREAS).map(([category, skills]) => (
+              {TECHNICAL_AREAS && Object.entries(TECHNICAL_AREAS).map(([category, skills]) => (
                 <div key={category} className="space-y-2">
                   <div className="flex items-center space-x-2 p-2 bg-green-50 rounded">
                     <Checkbox
@@ -1548,26 +1548,38 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
                                   </div>
                                 </TableCell>
                                 <TableCell>
-                                  <Badge variant="outline">
-                                    {candidate.scores?.softSkills || 0}%
-                                  </Badge>
+                                  {candidate.application.assessmentStatus?.softSkills === 'completed' ? (
+                                    <Badge variant="outline">
+                                      {candidate.scores?.softSkills || 0}%
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline">Pending</Badge>
+                                  )}
                                 </TableCell>
                                 <TableCell>
-                                  <Badge variant="outline">
-                                    {candidate.scores?.technical || 0}%
-                                  </Badge>
+                                  {candidate.application.assessmentStatus?.technical === 'completed' ? (
+                                    <Badge variant="outline">
+                                      {candidate.scores?.technical || 0}%
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline">Pending</Badge>
+                                  )}
                                 </TableCell>
                                 <TableCell>
-                                  <Badge className="bg-blue-100 text-blue-800">
-                                    {candidate.scores?.weighted?.toFixed(1) || 0}%
-                                  </Badge>
+                                  {candidate.application.assessmentStatus?.softSkills === 'completed' || candidate.application.assessmentStatus?.technical === 'completed' ? (
+                                    <Badge className="bg-blue-100 text-blue-800">
+                                      {candidate.scores?.weighted?.toFixed(1) || 0}%
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline">Pending</Badge>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   {candidate.application.resumeScoreStatus === 'pending' ? (
                                     <Badge variant="outline">Pending</Badge>
-                                  ) : candidate.application.resumeScore?.analysis.overallScore ? (
-                                    <Badge className={getResumeScoreColor(candidate.application.resumeScore.analysis.overallScore)}>
-                                      {candidate.application.resumeScore.analysis.overallScore.toFixed(1)}%
+                                  ) : candidate.application.resumeScore?.overallScore ? (
+                                    <Badge className={getResumeScoreColor(candidate.application.resumeScore.overallScore)}>
+                                      {candidate.application.resumeScore.overallScore.toFixed(1)}%
                                     </Badge>
                                   ) : (
                                     <span className="text-sm text-gray-400">N/A</span>
@@ -1664,98 +1676,166 @@ export function EnhancedAdminPanel({ onBack }: EnhancedAdminPanelProps) {
 
       {/* Candidate Detail Dialog */}
       <Dialog open={isCandidateDialogOpen} onOpenChange={setIsCandidateDialogOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Candidate Details</DialogTitle>
-            <DialogDescription>
-              Detailed information about the candidate
-            </DialogDescription>
-          </DialogHeader>
-          
-          {selectedCandidate && (
-            <div className="space-y-6">
-              {/* Profile Information */}
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Profile Information</h4>
-                  <div className="space-y-2 text-sm">
-                    <div><strong>Name:</strong> {selectedCandidate.profile?.name}</div>
-                    <div><strong>Email:</strong> {selectedCandidate.profile?.email}</div>
-                    <div><strong>Phone:</strong> {selectedCandidate.profile?.phone || 'N/A'}</div>
-                    <div><strong>Location:</strong> {selectedCandidate.profile?.location}</div>
-                  </div>
-                </div>
-                
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Assessment Scores</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Soft Skills:</span>
-                      <Badge variant="outline">{selectedCandidate.scores?.softSkills || 0}%</Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Technical:</span>
-                      <Badge variant="outline">{selectedCandidate.scores?.technical || 0}%</Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Weighted Score:</span>
-                      <Badge className="bg-blue-100 text-blue-800">{selectedCandidate.scores?.weighted?.toFixed(1) || 0}%</Badge>
-                    </div>
-                    {selectedCandidate.resumeScore?.analysis.overallScore && (
-                      <div className="flex justify-between">
-                        <span>Resume Score:</span>
-                        <Badge className={getResumeScoreColor(selectedCandidate.resumeScore.analysis.overallScore)}>
-                          {selectedCandidate.resumeScore.analysis.overallScore.toFixed(1)}%
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Candidate Details</DialogTitle>
+          <DialogDescription>
+            Detailed information about the candidate and their assessment.
+          </DialogDescription>
+        </DialogHeader>
+        
+        {selectedCandidate && (
+          <div className="space-y-6 max-h-[70vh] overflow-y-auto">
+            {/* Profile Information */}
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Profile Information</h4>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Name:</strong> {selectedCandidate.profile?.name}</div>
+                  <div><strong>Email:</strong> {selectedCandidate.profile?.email}</div>
+                  <div><strong>Phone:</strong> {selectedCandidate.profile?.phone || 'N/A'}</div>
+                  <div><strong>Location:</strong> {selectedCandidate.profile?.location}</div>
                 </div>
               </div>
-
-              {/* Bio and Experience */}
-              {selectedCandidate.profile?.bio && (
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Bio</h4>
-                  <p className="text-sm text-gray-600">{selectedCandidate.profile.bio}</p>
+              
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Assessment Scores</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span>Soft Skills:</span>
+                    <Badge variant="outline">{selectedCandidate.scores?.softSkills || 0}%</Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Technical:</span>
+                    <Badge variant="outline">{selectedCandidate.scores?.technical || 0}%</Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Weighted Score:</span>
+                    <Badge className="bg-blue-100 text-blue-800">{selectedCandidate.scores?.weighted?.toFixed(1) || 0}%</Badge>
+                  </div>
+                  {selectedCandidate.resumeScore?.analysis.overallScore && (
+                    <div className="flex justify-between">
+                      <span>Resume Score:</span>
+                      <Badge className={getResumeScoreColor(selectedCandidate.resumeScore.analysis.overallScore)}>
+                        {selectedCandidate.resumeScore.analysis.overallScore.toFixed(1)}%
+                      </Badge>
+                    </div>
+                  )}
                 </div>
-              )}
-
-              {selectedCandidate.profile?.experience && (
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Experience</h4>
-                  <p className="text-sm text-gray-600">{selectedCandidate.profile.experience}</p>
-                </div>
-              )}
-
-              {selectedCandidate.profile?.skills && (
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Skills</h4>
-                  <p className="text-sm text-gray-600">{selectedCandidate.profile.skills}</p>
-                </div>
-              )}
-
-              {selectedCandidate.profile?.education && (
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Education</h4>
-                  <p className="text-sm text-gray-600">{selectedCandidate.profile.education}</p>
-                </div>
-              )}
+              </div>
             </div>
-          )}
-          
-          <div className="flex justify-end gap-4 pt-4">
-            {selectedCandidate?.profile?.resumeUrl && (
-              <Button variant="outline" onClick={() => downloadResume(selectedCandidate)}>
-                <Download className="h-4 w-4 mr-2" />
-                Download Resume
-              </Button>
+
+            {/* Assessment Report */}
+            {selectedCandidate.application?.assessmentReport && (
+                <div>
+                    <h4 className="font-semibold text-gray-900 mb-2">AI Assessment Reports</h4>
+                    
+                    {/* Soft Skills Report */}
+                    {selectedCandidate.application.assessmentReport.softSkills && (
+                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-3 text-sm mb-4">
+                            <h5 className="font-bold text-blue-800">Soft Skills Assessment Report</h5>
+                            <div>
+                                <strong className="text-gray-700">Overall Score:</strong> {selectedCandidate.application.assessmentReport.softSkills.overallScore}/100
+                            </div>
+                            <div>
+                                <strong className="text-gray-700">Strengths:</strong>
+                                <p className="text-gray-600 whitespace-pre-wrap">{selectedCandidate.application.assessmentReport.softSkills.strengths}</p>
+                            </div>
+                            <div>
+                                <strong className="text-gray-700">Areas for Improvement:</strong>
+                                <p className="text-gray-600 whitespace-pre-wrap">{selectedCandidate.application.assessmentReport.softSkills.improvements}</p>
+                            </div>
+                            {selectedCandidate.application.assessmentReport.softSkills.skillScores && (
+                                <div>
+                                    <strong className="text-gray-700">Detailed Breakdown:</strong>
+                                    <ul className="list-disc pl-5 mt-1 space-y-1">
+                                        {Object.entries(selectedCandidate.application.assessmentReport.softSkills.skillScores).map(([skill, score]: [string, any]) => (
+                                            <li key={skill}>
+                                                <span className="font-medium">{skill}:</span> {score}/100
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Technical Report */}
+                    {selectedCandidate.application.assessmentReport.technical && (
+                        <div className="p-4 bg-green-50 rounded-lg border border-green-200 space-y-3 text-sm">
+                            <h5 className="font-bold text-green-800">Technical Assessment Report</h5>
+                            <div>
+                                <strong className="text-gray-700">Overall Score:</strong> {selectedCandidate.application.assessmentReport.technical.overallScore}/100
+                            </div>
+                            <div>
+                                <strong className="text-gray-700">Strengths:</strong>
+                                <p className="text-gray-600 whitespace-pre-wrap">{selectedCandidate.application.assessmentReport.technical.strengths}</p>
+                            </div>
+                            <div>
+                                <strong className="text-gray-700">Areas for Improvement:</strong>
+                                <p className="text-gray-600 whitespace-pre-wrap">{selectedCandidate.application.assessmentReport.technical.improvements}</p>
+                            </div>
+                            {selectedCandidate.application.assessmentReport.technical.skillScores && (
+                                <div>
+                                    <strong className="text-gray-700">Detailed Breakdown:</strong>
+                                    <ul className="list-disc pl-5 mt-1 space-y-1">
+                                        {Object.entries(selectedCandidate.application.assessmentReport.technical.skillScores).map(([skill, score]: [string, any]) => (
+                                            <li key={skill}>
+                                                <span className="font-medium">{skill}:</span> {score}/100
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             )}
-            <Button onClick={() => setIsCandidateDialogOpen(false)}>
-              Close
-            </Button>
+
+
+            {/* Bio and Experience */}
+            {selectedCandidate.profile?.bio && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Bio</h4>
+                <p className="text-sm text-gray-600">{selectedCandidate.profile.bio}</p>
+              </div>
+            )}
+
+            {selectedCandidate.profile?.experience && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Experience</h4>
+                <p className="text-sm text-gray-600">{selectedCandidate.profile.experience}</p>
+              </div>
+            )}
+
+            {selectedCandidate.profile?.skills && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Skills</h4>
+                <p className="text-sm text-gray-600">{selectedCandidate.profile.skills}</p>
+              </div>
+            )}
+
+            {selectedCandidate.profile?.education && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Education</h4>
+                <p className="text-sm text-gray-600">{selectedCandidate.profile.education}</p>
+              </div>
+            )}
           </div>
-        </DialogContent>
+        )}
+        
+        <div className="flex justify-end gap-4 pt-4">
+          {selectedCandidate?.profile?.resumeUrl && (
+            <Button variant="outline" onClick={() => downloadResume(selectedCandidate)}>
+              <Download className="h-4 w-4 mr-2" />
+              Download Resume
+            </Button>
+          )}
+          <Button onClick={() => setIsCandidateDialogOpen(false)}>
+            Close
+          </Button>
+        </div>
+      </DialogContent>
       </Dialog>
     </div>
   );
